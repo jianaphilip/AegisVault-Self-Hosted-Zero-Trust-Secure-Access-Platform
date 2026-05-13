@@ -1,0 +1,9 @@
+http:
+  routers:
+    traefik-dashboard:
+      entryPoints:
+        - websecure
+      rule: Host(`traefik.local`)
+      service: api@internal
+      tls:
+        certResolver: le

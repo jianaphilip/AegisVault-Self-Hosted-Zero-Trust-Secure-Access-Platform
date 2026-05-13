@@ -1,0 +1,208 @@
+services:
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '8080:8080'
+    volumes:
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      - ./traefik/acme.json:/letsencrypt/acme.json
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - traefik
+      - backend
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:22.0.1
+    container_name: keycloak
+    restart: unless-stopped
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: adminpassword
+      KEYCLOAK_IMPORT: /opt/keycloak/data/import/realm-export.json
+    command:
+      - start-dev
+      - --import-realm
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.keycloak.rule=Host(`${KEYCLOAK_HOST}`)
+      - traefik.http.routers.keycloak.entrypoints=websecure
+      - traefik.http.routers.keycloak.tls.certresolver=le
+    networks:
+      - traefik
+      - backend
+
+  db:
+    image: mariadb:10.11
+    container_name: nextcloud-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: nextcloud
+      MYSQL_USER: nextcloud
+      MYSQL_PASSWORD: nextcloudpass
+    volumes:
+      - nextcloud_db_data:/var/lib/mysql
+    networks:
+      - backend
+
+  nextcloud:
+    image: nextcloud:latest
+    container_name: nextcloud
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      MYSQL_HOST: db
+      MYSQL_DATABASE: nextcloud
+      MYSQL_USER: nextcloud
+      MYSQL_PASSWORD: nextcloudpass
+    volumes:
+      - nextcloud_data:/var/www/html
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.nextcloud.rule=Host(`${NEXTCLOUD_HOST}`)
+      - traefik.http.routers.nextcloud.entrypoints=websecure
+      - traefik.http.routers.nextcloud.tls.certresolver=le
+    networks:
+      - traefik
+      - backend
+
+  wireguard:
+    image: ghcr.io/linuxserver/wireguard:latest
+    container_name: wireguard
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: UTC
+      SERVERURL: ${WIREGUARD_HOST}
+      SERVERPORT: 51820
+      PEERS: 1
+      PEERDNS: 1.1.1.1
+      ALLOWEDIPS: 0.0.0.0/0
+      INTERNAL_SUBNET: 10.13.13.0
+    ports:
+      - '51820:51820/udp'
+    volumes:
+      - ./wireguard/config:/config
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    networks:
+      - backend
+
+  rbac-app:
+    build: ./rbac-app
+    container_name: rbac-app
+    restart: unless-stopped
+    depends_on:
+      - keycloak
+    volumes:
+      - ./monitoring/ai/rbac_logs:/app/logs
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.rbac-app.rule=Host(`${APP_HOST}`)
+      - traefik.http.routers.rbac-app.entrypoints=websecure
+      - traefik.http.routers.rbac-app.tls.certresolver=le
+    networks:
+      - traefik
+      - backend
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - '9090:9090'
+    networks:
+      - backend
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.prometheus.rule=Host(`${PROMETHEUS_HOST}`)
+      - traefik.http.routers.prometheus.entrypoints=websecure
+      - traefik.http.routers.prometheus.tls.certresolver=le
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - '3000:3000'
+    networks:
+      - backend
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.grafana.rule=Host(`${GRAFANA_HOST}`)
+      - traefik.http.routers.grafana.entrypoints=websecure
+      - traefik.http.routers.grafana.tls.certresolver=le
+
+  wazuh-manager:
+    image: wazuh/wazuh:5.4.0
+    container_name: wazuh-manager
+    restart: unless-stopped
+    environment:
+      WAZUH_MANAGER: 'yes'
+    ports:
+      - '1514:1514/udp'
+    networks:
+      - backend
+
+  wazuh-dashboard:
+    image: wazuh/wazuh-dashboard:5.4.0
+    container_name: wazuh-dashboard
+    restart: unless-stopped
+    depends_on:
+      - wazuh-manager
+    environment:
+      WAZUH_PASSWORD: admin
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.wazuh.rule=Host(`${WAZUH_HOST}`)
+      - traefik.http.routers.wazuh.entrypoints=websecure
+      - traefik.http.routers.wazuh.tls.certresolver=le
+    networks:
+      - traefik
+      - backend
+
+  ai-security:
+    build: ./ai-security
+    container_name: ai-security
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+      - wazuh-manager
+    volumes:
+      - ./monitoring/ai/rbac_logs:/data/logs
+      - ./monitoring/ai/alerts:/data/alerts
+    networks:
+      - backend
+
+volumes:
+  nextcloud_db_data:
+  nextcloud_data:
+  grafana_data:
+
+networks:
+  traefik:
+    external: false
+  backend:
+    external: false

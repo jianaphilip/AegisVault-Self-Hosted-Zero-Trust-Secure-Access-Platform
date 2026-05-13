@@ -1,0 +1,56 @@
+{
+  "id": "enterprise-zta",
+  "realm": "enterprise-zta",
+  "enabled": true,
+  "roles": {
+    "realm": [
+      { "name": "Admin" },
+      { "name": "Security Analyst" },
+      { "name": "Developer" },
+      { "name": "Guest" }
+    ]
+  },
+  "users": [
+    {
+      "username": "admin",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "AdminPass123!", "temporary": false }],
+      "realmRoles": ["Admin"]
+    },
+    {
+      "username": "analyst",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "AnalystPass123!", "temporary": false }],
+      "realmRoles": ["Security Analyst"]
+    },
+    {
+      "username": "developer",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "DeveloperPass123!", "temporary": false }],
+      "realmRoles": ["Developer"]
+    },
+    {
+      "username": "guest",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "GuestPass123!", "temporary": false }],
+      "realmRoles": ["Guest"]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "rbac-app",
+      "publicClient": true,
+      "redirectUris": ["https://app.local/*", "https://app.local/*"],
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "attributes": {
+        "access.token.lifespan": "300"
+      }
+    }
+  ]
+}
